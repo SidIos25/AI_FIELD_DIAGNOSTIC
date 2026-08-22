@@ -1,0 +1,9 @@
+google-adk
+fastapi
+uvicorn
+python-dotenv
+chromadb
+openai
+pypdf
+pytest
+requests

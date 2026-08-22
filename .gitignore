@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+rag_store/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/.pytest_cache/
+.adk/
+**/.adk/
+*.pyo
+*.pyd
+*.log
+*.sqlite3
