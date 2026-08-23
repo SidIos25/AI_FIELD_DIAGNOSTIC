@@ -55,22 +55,22 @@ JSON merge, confidence/parts policy, and output redaction
 
 ```mermaid
 flowchart TD
-      C[Client or browser UI] --> API[FastAPI app]
-      API --> AUTH[require_diagnostic_api_key]
-      AUTH --> LIMIT[In-process /diagnose rate limit]
-      LIMIT --> VALIDATE[DiagnosticRequest and strict guardrails]
-      VALIDATE --> WF[services/workflow_runner.py]
-      WF --> RAG[retrieve_context]
-      RAG --> VS[(Chroma persistent collection)]
-      VS --> EMB[OpenAI text-embedding-3-small]
+   C[Client or browser] --> API[FastAPI application]
+   API --> AUTH[API key authentication]
+   AUTH --> LIMIT[Diagnostic rate limit]
+   LIMIT --> VALIDATE[Request validation and guardrails]
+   VALIDATE --> WF[Diagnostic workflow runner]
+   WF --> RAG[Context retrieval]
+   RAG --> VS[(Chroma vector store)]
+   VS --> EMB[OpenAI embeddings]
       WF --> ROOT[FieldDiagnosticRootAgent]
       ROOT --> DIAG[ParallelDiagnostics]
       ROOT --> SYNTH[RootCauseSynthesizer]
       ROOT --> DECIDE[DecisionLayer]
-      DECIDE --> OUT[Validated and redacted response]
+   DECIDE --> OUT[Validated redacted result]
       OUT --> API
-      ROOT --> LLM[LiteLLM via OpenAI gpt-4.1-mini]
-      API --> UI[static/index.html, app.js, styles.css]
+   ROOT --> LLM[LiteLLM model provider]
+   API --> UI[Browser interface]
 ```
 
 `run.py` starts Uvicorn with `app.main:app` on port `8000` in reload mode.
@@ -79,31 +79,31 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-      participant Client
-      participant API as api/routes.py
+   participant Client
+   participant API as FastAPI API
       participant Guard as SecurityGuardrails
-      participant Runner as workflow_runner.py
-      participant RAG as retriever/vector_store
+   participant Runner as Workflow runner
+   participant RAG as RAG service
       participant ADK as Google ADK Runner
-      participant Model as OpenAI-compatible provider
+   participant Model as Model provider
 
-      Client->>API: POST /diagnose + JSON + X-API-Key
+   Client->>API: Submit diagnostic request
       API->>API: Authenticate and check rate limit
       API->>API: Pydantic validation
       API->>Guard: Validate and sanitize fields
-      Guard-->>API: Sanitized input or HTTP 400
-      API->>Runner: run_diagnostic_workflow(input)
-      Runner->>RAG: Query local Chroma collection
+   Guard-->>API: Sanitized input or rejection
+   API->>Runner: Start diagnostic workflow
+   Runner->>RAG: Query local vector store
       RAG-->>Runner: Context and source metadata
       Runner->>ADK: Run FieldDiagnosticRootAgent
-      ADK->>Model: Agent prompts and tool-assisted analysis
+   ADK->>Model: Agent analysis requests
       Model-->>ADK: Agent event text
       ADK-->>Runner: Collected responses
-      Runner->>Runner: Parse JSON and apply decision policy
-      Runner-->>API: final_response and response metadata
+   Runner->>Runner: Parse responses and apply policy
+   Runner-->>API: Diagnostic result
       API->>Guard: Validate and redact output
       Guard-->>API: Sanitized result
-      API-->>Client: 200 response with result wrapper
+   API-->>Client: Diagnostic response
 ```
 
 Authentication runs before the route body. Missing or invalid credentials return `401`; malformed request fields return `422`; guardrail rejection returns `400`; workflow exceptions return `500`.
@@ -150,18 +150,18 @@ AI_FIELD_DIAGNOSTIC/
 
 ```mermaid
 flowchart TD
-      ROOT[FieldDiagnosticRootAgent<br/>SequentialAgent] --> PD[ParallelDiagnostics<br/>ParallelAgent]
-      PD --> PAT[PatternDiagnosticAgent<br/>sensor-pattern evidence]
-      PD --> KNOW[KnowledgeDiagnosticAgent<br/>error-code correlation]
-      ROOT --> SYN[RootCauseSynthesizer<br/>combines diagnostic evidence]
-      ROOT --> DL[DecisionLayer<br/>ParallelAgent]
-      DL --> PLAN[RepairPlannerAgent<br/>repair steps and inventory]
-      DL --> ESC[EscalationAgent<br/>ticket when repair cannot proceed]
+   ROOT[FieldDiagnosticRootAgent] --> PD[ParallelDiagnostics]
+   PD --> PAT[PatternDiagnosticAgent]
+   PD --> KNOW[KnowledgeDiagnosticAgent]
+   ROOT --> SYN[RootCauseSynthesizer]
+   ROOT --> DL[DecisionLayer]
+   DL --> PLAN[RepairPlannerAgent]
+   DL --> ESC[EscalationAgent]
       PAT --> SYN
       KNOW --> SYN
       SYN --> PLAN
       SYN --> ESC
-      PLAN --> FINAL[Collected and policy-validated result]
+   PLAN --> FINAL[Policy validated result]
       ESC --> FINAL
 ```
 
@@ -179,15 +179,15 @@ All five LLM agents use `openai/gpt-4.1-mini` through ADK's `LiteLlm`, with temp
 
 ```mermaid
 flowchart LR
-      D[Files under approved RAG_DATA_DIR] --> LOAD[loaders.py]
-      LOAD --> TYPES[TXT, MD, JSON, CSV, PDF]
-      TYPES --> CHUNK[Normalize and overlap-chunk text]
-      CHUNK --> EMB[OpenAI text-embedding-3-small]
-      EMB --> UPSERT[ingest_directory]
-      UPSERT --> STORE[(Chroma PersistentClient<br/>rag_store/field_diagnostics)]
-      Q[Device + error code + description] --> RET[retrieve_context]
+   D[Approved document files] --> LOAD[Document loading]
+   LOAD --> TYPES[Supported file types]
+   TYPES --> CHUNK[Normalize and chunk text]
+   CHUNK --> EMB[OpenAI embedding model]
+   EMB --> UPSERT[Document ingestion]
+   UPSERT --> STORE[(Chroma vector store)]
+   Q[Diagnostic request] --> RET[Context retrieval]
       RET --> STORE
-      STORE --> CONTEXT[Top-k documents and source metadata]
+   STORE --> CONTEXT[Relevant documents and sources]
       CONTEXT --> WF[Diagnostic workflow]
 ```
 
@@ -431,17 +431,17 @@ Check `OPENAI_KEY` and `DIAGNOSTIC_TIMEOUT_SECONDS`. RAG retrieval is retried an
 
 ```mermaid
 flowchart TD
-      A[Client] --> B[FastAPI: POST /diagnose]
-      B --> C[API key + in-process rate limit]
-      C --> D[Pydantic + strict security guardrails]
+   A[Client] --> B[FastAPI API]
+   B --> C[API key and rate limit]
+   C --> D[Request validation and guardrails]
       D --> E[Retrieve top-k local Chroma context]
       E --> F[ADK root agent]
       F --> G[Parallel pattern and knowledge analysis]
       G --> H[Root-cause synthesis]
       H --> I[Parallel repair planning and escalation]
-      I --> J[JSON validation + confidence/parts policy]
-      J --> K[Sensitive-value redaction]
-      K --> L[Response: {result: ...}]
+   I --> J[JSON validation and decision policy]
+   J --> K[Sensitive value redaction]
+   K --> L[Diagnostic response]
 ```
 
 > **Known product gap:** the static browser form sends the diagnostic JSON body but does not send `X-API-Key`. Because `/diagnose` requires that header, direct form submissions currently receive `401`. This README documents the behavior; it does not change application code.
